@@ -43,34 +43,81 @@ export default function ScanPage() {
   const volunteerNameRef = useRef(volunteerName);
   useEffect(() => { volunteerNameRef.current = volunteerName; }, [volunteerName]);
 
+  const extractTicketNumber = (data: string): string | null => {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.ticket) return String(parsed.ticket).toUpperCase();
+    } catch {
+      // not JSON — fall through
+    }
+    const plain = data.trim().toUpperCase();
+    return plain || null;
+  };
+
   // ── Core scan handler ─────────────────────────────────────────────────────
   const handleScan = useCallback(async (qrData: string) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     setScanStatus('scanning');
 
+    const ticketNumber = extractTicketNumber(qrData);
+    if (!ticketNumber) {
+      setScanResult({
+        success: false,
+        alreadyUsed: false,
+        message: 'Ticket number not found in QR / input',
+      });
+      setScanStatus('error');
+      submittingRef.current = false;
+      cooldownRef.current = false;
+      lastScanRef.current = '';
+      return;
+    }
+
     console.log('[Scan] qrData:', qrData);
-    console.log('[Scan] posting to:', `${API_BASE}/tickets/scan`);
+    console.log('[Scan] validate:', `${API_BASE}/${ticketNumber}`);
 
     try {
-      const { data } = await axios.post<ScanResult>(`${API_BASE}/tickets/scan`, {
-        qrData,
-        scannedBy: volunteerNameRef.current || 'Volunteer',
-      });
+      // Step 1: validate ticket number
+      const { data: validation } = await axios.post<ScanResult>(
+        `${API_BASE}/${ticketNumber}`,
+      );
 
-      console.log('[Scan] response:', data);
+      console.log('[Scan] validation:', validation);
 
-      setScanResult(data);
-      if (data.success) {
+      if (!validation.success) {
+        setScanResult(validation);
+        if (validation.alreadyUsed) {
+          setScanStatus('already_used');
+        } else {
+          setScanStatus('error');
+        }
+        return;
+      }
+
+      // Step 2: record entry
+      const { data: entry } = await axios.post<ScanResult>(
+        `${API_BASE}/entry`,
+        {
+          ticketNumber,
+          scannedBy: volunteerNameRef.current || 'Volunteer',
+        }
+      );
+
+      console.log('[Scan] entry:', entry);
+
+      setScanResult(entry);
+      if (entry.success) {
         setScanStatus('success');
         navigator.vibrate?.([200, 100, 200]);
-      } else if (data.alreadyUsed) {
+      } else if (entry.alreadyUsed) {
         setScanStatus('already_used');
         navigator.vibrate?.(500);
       } else {
         setScanStatus('error');
         navigator.vibrate?.(500);
       }
+
     } catch (err: unknown) {
       console.error('[Scan] error:', err);
       const message =
