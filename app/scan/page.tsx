@@ -97,9 +97,8 @@ export default function ScanPage() {
 
       // Step 2: record entry
       const { data: entry } = await axios.post<ScanResult>(
-        `${API_BASE}/entry`,
+        `${API_BASE}/entry/${ticketNumber}`,
         {
-          ticketNumber,
           scannedBy: volunteerNameRef.current || 'Volunteer',
         }
       );
