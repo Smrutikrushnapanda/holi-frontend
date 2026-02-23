@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API_BASE } from '@/lib/utils';
 
-type ScanStatus = 'idle' | 'scanning' | 'success' | 'already_used' | 'error';
+type ScanStatus = 'idle' | 'pending' | 'scanning' | 'success' | 'already_used' | 'error';
 
 interface ScanResult {
   success: boolean;
@@ -32,6 +32,8 @@ export default function ScanPage() {
   const [scannerReady, setScannerReady] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTicket, setManualTicket] = useState('');
+  const [pendingQrData, setPendingQrData] = useState('');
+  const [pendingTicketNumber, setPendingTicketNumber] = useState('');
 
   const scannerRef   = useRef<unknown>(null);
   const lastScanRef  = useRef<string>('');
@@ -97,14 +99,21 @@ export default function ScanPage() {
           qrbox: { width: 250, height: 250 },
           aspectRatio: 1.0,
         },
-        async (decodedText) => {
+        (decodedText) => {
           if (cooldownRef.current || decodedText === lastScanRef.current) return;
           cooldownRef.current = true;
           lastScanRef.current = decodedText;
 
-          await handleScan(decodedText);   // handleScan is stable (useCallback [])
+          // Extract ticket number for preview
+          let ticketNum = decodedText.trim().toUpperCase();
+          try {
+            const parsed = JSON.parse(decodedText);
+            if (parsed.ticket) ticketNum = parsed.ticket;
+          } catch { /* plain ticket number */ }
 
-          setTimeout(() => { cooldownRef.current = false; }, 3000);
+          setPendingQrData(decodedText);
+          setPendingTicketNumber(ticketNum);
+          setScanStatus('pending');
         },
         () => {} // per-frame error — silent
       );
@@ -165,9 +174,15 @@ export default function ScanPage() {
     submittingRef.current = false;
   };
 
+  const handleSubmitScan = async () => {
+    await handleScan(pendingQrData);
+  };
+
   const handleReset = async () => {
     setScanStatus('idle');
     setScanResult(null);
+    setPendingQrData('');
+    setPendingTicketNumber('');
     lastScanRef.current = '';
     cooldownRef.current = false;
     submittingRef.current = false;
@@ -359,6 +374,38 @@ export default function ScanPage() {
                 )}
               </div>
             </>
+          )}
+
+          {/* PENDING — QR detected, waiting for confirm */}
+          {scanStatus === 'pending' && (
+            <div className="space-y-4 animate-in">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30">
+                  <Ticket className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-blue-400 font-bold text-lg">QR Scanned</p>
+                  <p className="text-gray-400 text-sm">Review and confirm entry</p>
+                </div>
+              </div>
+              <div className="bg-gray-800 rounded-2xl p-4">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-sm">Ticket</span>
+                  <span className="text-white font-mono font-bold text-xl">{pendingTicketNumber}</span>
+                </div>
+              </div>
+              <Button
+                className="w-full h-12 text-base font-semibold bg-green-600 hover:bg-green-700"
+                onClick={handleSubmitScan}
+              >
+                <CheckCircle className="w-5 h-5" />
+                Submit — Allow Entry
+              </Button>
+              <Button variant="outline" className="w-full h-11" onClick={handleReset}>
+                <RotateCcw className="w-4 h-4" />
+                Cancel
+              </Button>
+            </div>
           )}
 
           {/* SUCCESS */}
