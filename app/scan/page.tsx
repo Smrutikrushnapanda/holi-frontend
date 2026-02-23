@@ -32,7 +32,6 @@ export default function ScanPage() {
   const [scannerReady, setScannerReady] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTicket, setManualTicket] = useState('');
-  const [pendingQrData, setPendingQrData] = useState('');
   const [pendingTicketNumber, setPendingTicketNumber] = useState('');
 
   const scannerRef   = useRef<unknown>(null);
@@ -61,10 +60,13 @@ export default function ScanPage() {
       setScanResult(data);
       if (data.success) {
         setScanStatus('success');
+        navigator.vibrate?.([200, 100, 200]);
       } else if (data.alreadyUsed) {
         setScanStatus('already_used');
+        navigator.vibrate?.(500);
       } else {
         setScanStatus('error');
+        navigator.vibrate?.(500);
       }
     } catch (err: unknown) {
       const message =
@@ -73,6 +75,7 @@ export default function ScanPage() {
           : 'Failed to validate ticket. Check your connection.';
       setScanResult({ success: false, alreadyUsed: false, message });
       setScanStatus('error');
+      navigator.vibrate?.(500);
     } finally {
       submittingRef.current = false;
     }
@@ -111,7 +114,7 @@ export default function ScanPage() {
             if (parsed.ticket) ticketNum = parsed.ticket;
           } catch { /* plain ticket number */ }
 
-          setPendingQrData(decodedText);
+          navigator.vibrate?.(100);
           setPendingTicketNumber(ticketNum);
           setScanStatus('pending');
         },
@@ -175,13 +178,12 @@ export default function ScanPage() {
   };
 
   const handleSubmitScan = async () => {
-    await handleScan(pendingQrData);
+    await handleScan(pendingTicketNumber);
   };
 
   const handleReset = async () => {
     setScanStatus('idle');
     setScanResult(null);
-    setPendingQrData('');
     setPendingTicketNumber('');
     lastScanRef.current = '';
     cooldownRef.current = false;
