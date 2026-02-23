@@ -83,6 +83,26 @@ body {
   animation: animate-in 0.3s ease-out;
 }
 
+/* ── html5-qrcode fixes ─────────────────────────────────────────────────── */
+/* Force the video to fill the scanner container correctly                   */
+#holi-qr-scanner {
+  position: relative !important;
+}
+#holi-qr-scanner > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+#holi-qr-scanner video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+/* Hide the file-upload & anchor buttons html5-qrcode sometimes adds */
+#holi-qr-scanner__scan_region img,
+#holi-qr-scanner__dashboard {
+  display: none !important;
+}
+
 /* Happy festive font utility */
 .font-festive {
   font-family: var(--font-nunito), 'Arial Rounded MT Bold', Arial, sans-serif;

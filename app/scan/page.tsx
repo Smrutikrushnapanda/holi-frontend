@@ -29,93 +29,31 @@ export default function ScanPage() {
   const [nameSet, setNameSet] = useState(false);
   const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTicket, setManualTicket] = useState('');
-  const scannerRef = useRef<unknown>(null);
-  const scannerDivId = 'holi-qr-scanner';
-  const lastScanRef = useRef<string>('');
-  const cooldownRef = useRef<boolean>(false);
+
+  const scannerRef   = useRef<unknown>(null);
+  const lastScanRef  = useRef<string>('');
+  const cooldownRef  = useRef<boolean>(false);
+  const submittingRef = useRef<boolean>(false);   // use ref — avoids stale closure
   const nameLoadedRef = useRef(false);
+  const scannerDivId  = 'holi-qr-scanner';
 
-  const startScanner = useCallback(async () => {
-    if (typeof window === 'undefined') return;
-    const { Html5Qrcode } = await import('html5-qrcode');
+  // ── Always-current handleScan via ref (fixes stale closure in useCallback) ──
+  const volunteerNameRef = useRef(volunteerName);
+  useEffect(() => { volunteerNameRef.current = volunteerName; }, [volunteerName]);
 
-    if (scannerRef.current) {
-      try {
-        await (scannerRef.current as { stop: () => Promise<void> }).stop();
-      } catch {
-        // already stopped
-      }
-    }
-
-    const scanner = new Html5Qrcode(scannerDivId);
-    scannerRef.current = scanner;
-
-    try {
-      await scanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 220, height: 220 } },
-        async (decodedText) => {
-          if (cooldownRef.current || decodedText === lastScanRef.current) return;
-          cooldownRef.current = true;
-          lastScanRef.current = decodedText;
-          await handleScan(decodedText);
-          setTimeout(() => { cooldownRef.current = false; }, 3000);
-        },
-        () => {}
-      );
-      setScannerReady(true);
-    } catch (err) {
-      console.error('Camera error:', err);
-      setScanStatus('error');
-      setScanResult({
-        success: false,
-        alreadyUsed: false,
-        message: 'Camera access denied. Please allow camera permissions or use manual entry below.',
-      });
-    }
-  }, []);
-
-  const stopScanner = useCallback(async () => {
-    if (scannerRef.current) {
-      try {
-        await (scannerRef.current as { stop: () => Promise<void> }).stop();
-        scannerRef.current = null;
-        setScannerReady(false);
-      } catch {
-        // ignore
-      }
-    }
-  }, []);
-
-  // Load volunteer name from localStorage on mount
-  useEffect(() => {
-    if (nameLoadedRef.current) return;
-    nameLoadedRef.current = true;
-    const saved = localStorage.getItem('holi-volunteer-name');
-    if (saved && saved.trim()) {
-      setVolunteerName(saved);
-      setNameSet(true);
-      setTimeout(() => startScanner(), 400);
-    }
-  }, [startScanner]);
-
-  useEffect(() => {
-    return () => { stopScanner(); };
-  }, [stopScanner]);
-
-  const handleScan = async (qrData: string) => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
+  // The actual scan handler — called via ref so it's never stale
+  const handleScan = useCallback(async (qrData: string) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setScanStatus('scanning');
 
     try {
       const { data } = await axios.post<ScanResult>(`${API_BASE}/tickets/scan`, {
         qrData,
-        scannedBy: volunteerName || 'Volunteer',
+        scannedBy: volunteerNameRef.current || 'Volunteer',
       });
 
       setScanResult(data);
@@ -134,14 +72,115 @@ export default function ScanPage() {
       setScanResult({ success: false, alreadyUsed: false, message });
       setScanStatus('error');
     } finally {
-      setIsSubmitting(false);
+      submittingRef.current = false;
+    }
+  }, []);
+
+  const startScanner = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    const { Html5Qrcode } = await import('html5-qrcode');
+
+    // Stop any existing scanner first
+    if (scannerRef.current) {
+      try { await (scannerRef.current as { stop: () => Promise<void> }).stop(); } catch { /* ok */ }
+      scannerRef.current = null;
+    }
+
+    const scanner = new Html5Qrcode(scannerDivId);
+    scannerRef.current = scanner;
+
+    try {
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 15,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+        },
+        async (decodedText) => {
+          if (cooldownRef.current || decodedText === lastScanRef.current) return;
+          cooldownRef.current = true;
+          lastScanRef.current = decodedText;
+
+          await handleScan(decodedText);   // handleScan is stable (useCallback [])
+
+          setTimeout(() => { cooldownRef.current = false; }, 3000);
+        },
+        () => {} // per-frame error — silent
+      );
+      setScannerReady(true);
+    } catch (err) {
+      console.error('Camera error:', err);
+      setScanStatus('error');
+      setScanResult({
+        success: false,
+        alreadyUsed: false,
+        message: 'Camera access denied. Please allow camera permissions or use manual entry below.',
+      });
+    }
+  }, [handleScan]);
+
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current) {
+      try {
+        await (scannerRef.current as { stop: () => Promise<void> }).stop();
+        scannerRef.current = null;
+        setScannerReady(false);
+      } catch { /* ignore */ }
+    }
+  }, []);
+
+  // Load volunteer name from localStorage once on mount
+  useEffect(() => {
+    if (nameLoadedRef.current) return;
+    nameLoadedRef.current = true;
+    const saved = localStorage.getItem('holi-volunteer-name');
+    if (saved?.trim()) {
+      setVolunteerName(saved);
+      setNameSet(true);
+      setTimeout(() => startScanner(), 600);
+    }
+  }, [startScanner]);
+
+  useEffect(() => {
+    return () => { stopScanner(); };
+  }, [stopScanner]);
+
+  const handleSetName = () => {
+    if (!volunteerName.trim()) return;
+    localStorage.setItem('holi-volunteer-name', volunteerName.trim());
+    setNameSet(true);
+    setTimeout(startScanner, 400);
+  };
+
+  const handleChangeName = () => {
+    localStorage.removeItem('holi-volunteer-name');
+    stopScanner();
+    setNameSet(false);
+    setScanStatus('idle');
+    setScanResult(null);
+    setShowManual(false);
+    lastScanRef.current = '';
+    cooldownRef.current = false;
+    submittingRef.current = false;
+  };
+
+  const handleReset = async () => {
+    setScanStatus('idle');
+    setScanResult(null);
+    lastScanRef.current = '';
+    cooldownRef.current = false;
+    submittingRef.current = false;
+    setShowManual(false);
+    if (!scannerReady) {
+      await startScanner();
     }
   };
 
   const handleManualSubmit = async () => {
     const ticketNum = manualTicket.trim().toUpperCase();
     if (!ticketNum) return;
-    // Construct the JSON format the backend expects
+    // Construct the JSON format expected by backend
     const qrData = JSON.stringify({
       ticket: ticketNum,
       event: 'Holi Festival 2026',
@@ -153,37 +192,10 @@ export default function ScanPage() {
     await handleScan(qrData);
   };
 
-  const handleReset = async () => {
-    setScanStatus('idle');
-    setScanResult(null);
-    lastScanRef.current = '';
-    cooldownRef.current = false;
-    setShowManual(false);
-    if (!scannerReady) {
-      await startScanner();
-    }
-  };
-
-  const handleSetName = () => {
-    if (!volunteerName.trim()) return;
-    localStorage.setItem('holi-volunteer-name', volunteerName.trim());
-    setNameSet(true);
-    setTimeout(startScanner, 300);
-  };
-
-  const handleChangeName = () => {
-    localStorage.removeItem('holi-volunteer-name');
-    stopScanner();
-    setNameSet(false);
-    setScanStatus('idle');
-    setScanResult(null);
-    setShowManual(false);
-  };
-
+  // ── Welcome / name-entry screen ───────────────────────────────────────────
   if (!nameSet) {
     return (
       <div className="min-h-screen bg-linear-to-br from-orange-500 via-red-500 to-pink-500 flex items-center justify-center p-4">
-        {/* Decorative blobs */}
         <div className="absolute top-10 left-10 w-20 h-20 bg-yellow-400 rounded-full opacity-30 blur-xl" />
         <div className="absolute top-20 right-10 w-16 h-16 bg-pink-400 rounded-full opacity-30 blur-xl" />
         <div className="absolute bottom-20 left-20 w-24 h-24 bg-purple-400 rounded-full opacity-20 blur-xl" />
@@ -220,11 +232,7 @@ export default function ScanPage() {
                 />
               </div>
 
-              <Button
-                className="w-full h-12 text-base font-semibold"
-                onClick={handleSetName}
-                disabled={!volunteerName.trim()}
-              >
+              <Button className="w-full h-12 text-base font-semibold" onClick={handleSetName} disabled={!volunteerName.trim()}>
                 <Camera className="w-5 h-5" />
                 Start Scanning
               </Button>
@@ -239,6 +247,7 @@ export default function ScanPage() {
     );
   }
 
+  // ── Main scanner screen ────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col max-w-md mx-auto">
       {/* Header */}
@@ -260,19 +269,28 @@ export default function ScanPage() {
         </button>
       </div>
 
-      {/* Scanner Area */}
       <div className="flex-1 flex flex-col">
-        {/* QR Camera View — fixed 300px height so html5-qrcode fills correctly */}
+        {/* ── Camera area ─────────────────────────────────────────────────── */}
+        {/*
+          IMPORTANT: do NOT put overflow:hidden on the scanner div.
+          html5-qrcode needs position:relative on its container.
+          We give the outer wrapper a fixed height; the inner scanner div
+          gets the same fixed height so html5-qrcode can size the video correctly.
+        */}
         <div className="relative bg-black" style={{ height: '300px' }}>
+          {/* html5-qrcode target — must have explicit height & position:relative */}
           <div
             id={scannerDivId}
-            style={{ width: '100%', height: '100%', overflow: 'hidden' }}
+            style={{ width: '100%', height: '300px', position: 'relative' }}
           />
 
-          {/* Corner overlay for scan box */}
+          {/* Custom scan-box corners — absolute over camera view */}
           {scanStatus === 'idle' && scannerReady && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="relative w-52 h-52">
+            <div
+              className="absolute inset-0 flex items-center justify-center pointer-events-none"
+              style={{ zIndex: 20 }}
+            >
+              <div className="relative" style={{ width: 250, height: 250 }}>
                 <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-orange-400 rounded-tl-lg" />
                 <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-orange-400 rounded-tr-lg" />
                 <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-orange-400 rounded-bl-lg" />
@@ -283,7 +301,7 @@ export default function ScanPage() {
           )}
 
           {scanStatus === 'scanning' && (
-            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/60 flex items-center justify-center" style={{ zIndex: 20 }}>
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 <p className="text-white text-sm">Validating...</p>
@@ -292,8 +310,10 @@ export default function ScanPage() {
           )}
         </div>
 
-        {/* Result Panel */}
+        {/* ── Result / idle panel ──────────────────────────────────────────── */}
         <div className="flex-1 bg-gray-900 p-5 flex flex-col gap-4">
+
+          {/* IDLE state */}
           {scanStatus === 'idle' && (
             <>
               <div className="flex flex-col items-center justify-center gap-3 text-center py-4">
@@ -312,7 +332,7 @@ export default function ScanPage() {
                 )}
               </div>
 
-              {/* Manual Entry Toggle */}
+              {/* Manual entry toggle */}
               <div className="border-t border-gray-800 pt-4">
                 <button
                   className="w-full flex items-center justify-center gap-2 text-gray-400 text-sm hover:text-orange-400 transition-colors"
@@ -321,7 +341,6 @@ export default function ScanPage() {
                   <Keyboard className="w-4 h-4" />
                   {showManual ? 'Hide manual entry' : "Can't scan? Enter ticket number manually"}
                 </button>
-
                 {showManual && (
                   <div className="mt-3 space-y-2 animate-in">
                     <Input
@@ -332,11 +351,7 @@ export default function ScanPage() {
                       className="bg-gray-800 border-gray-700 text-white text-center text-base h-11 font-mono tracking-wider placeholder:text-gray-600"
                       autoFocus
                     />
-                    <Button
-                      className="w-full h-11 font-semibold"
-                      onClick={handleManualSubmit}
-                      disabled={!manualTicket.trim()}
-                    >
+                    <Button className="w-full h-11 font-semibold" onClick={handleManualSubmit} disabled={!manualTicket.trim()}>
                       <Ticket className="w-4 h-4" />
                       Validate Ticket
                     </Button>
@@ -346,6 +361,7 @@ export default function ScanPage() {
             </>
           )}
 
+          {/* SUCCESS */}
           {scanStatus === 'success' && scanResult && (
             <div className="space-y-4 animate-in">
               <div className="flex items-center gap-3">
@@ -357,13 +373,10 @@ export default function ScanPage() {
                   <p className="text-gray-400 text-sm">Ticket validated successfully</p>
                 </div>
               </div>
-
               <div className="bg-gray-800 rounded-2xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400 text-sm">Ticket</span>
-                  <span className="text-white font-mono font-bold text-lg">
-                    {scanResult.ticket?.ticket_number}
-                  </span>
+                  <span className="text-white font-mono font-bold text-lg">{scanResult.ticket?.ticket_number}</span>
                 </div>
                 <div className="h-px bg-gray-700" />
                 <div className="flex justify-between items-center">
@@ -376,12 +389,9 @@ export default function ScanPage() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400 text-sm">Venue</span>
-                  <span className="text-gray-200 text-sm text-right max-w-[60%]">
-                    {scanResult.ticket?.event_place}
-                  </span>
+                  <span className="text-gray-200 text-sm text-right max-w-[60%]">{scanResult.ticket?.event_place}</span>
                 </div>
               </div>
-
               <Button className="w-full h-12 text-base font-semibold" onClick={handleReset}>
                 <Camera className="w-5 h-5" />
                 Scan Next Ticket
@@ -389,6 +399,7 @@ export default function ScanPage() {
             </div>
           )}
 
+          {/* ALREADY USED */}
           {scanStatus === 'already_used' && scanResult && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -400,13 +411,10 @@ export default function ScanPage() {
                   <p className="text-gray-400 text-sm">This ticket was already scanned</p>
                 </div>
               </div>
-
               <div className="bg-gray-800 border border-red-900 rounded-2xl p-4 space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400 text-sm">Ticket</span>
-                  <span className="text-red-400 font-mono font-bold text-lg">
-                    {scanResult.ticket?.ticket_number}
-                  </span>
+                  <span className="text-red-400 font-mono font-bold text-lg">{scanResult.ticket?.ticket_number}</span>
                 </div>
                 <div className="h-px bg-gray-700" />
                 <div className="flex justify-between items-center">
@@ -426,14 +434,10 @@ export default function ScanPage() {
                   </div>
                 )}
               </div>
-
               <div className="bg-red-950/50 border border-red-800 rounded-xl p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                <p className="text-red-300 text-xs leading-relaxed">
-                  Do not allow entry. This ticket has already been used.
-                </p>
+                <p className="text-red-300 text-xs leading-relaxed">Do not allow entry. This ticket has already been used.</p>
               </div>
-
               <Button className="w-full h-12 text-base font-semibold" onClick={handleReset}>
                 <RotateCcw className="w-5 h-5" />
                 Scan Another
@@ -441,6 +445,7 @@ export default function ScanPage() {
             </div>
           )}
 
+          {/* ERROR */}
           {scanStatus === 'error' && scanResult && (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
@@ -452,12 +457,11 @@ export default function ScanPage() {
                   <p className="text-gray-400 text-sm">Could not validate</p>
                 </div>
               </div>
-
               <div className="bg-gray-800 border border-amber-900 rounded-2xl p-4">
                 <p className="text-gray-300 text-sm">{scanResult.message}</p>
               </div>
 
-              {/* Show manual entry on error too */}
+              {/* Manual entry on error too */}
               <div className="border-t border-gray-800 pt-3">
                 <button
                   className="w-full flex items-center justify-center gap-2 text-gray-400 text-sm hover:text-orange-400 transition-colors mb-3"
@@ -476,11 +480,7 @@ export default function ScanPage() {
                       className="bg-gray-800 border-gray-700 text-white text-center text-base h-11 font-mono tracking-wider placeholder:text-gray-600"
                       autoFocus
                     />
-                    <Button
-                      className="w-full h-11 font-semibold"
-                      onClick={handleManualSubmit}
-                      disabled={!manualTicket.trim()}
-                    >
+                    <Button className="w-full h-11 font-semibold" onClick={handleManualSubmit} disabled={!manualTicket.trim()}>
                       <Ticket className="w-4 h-4" />
                       Validate Ticket
                     </Button>
@@ -494,6 +494,7 @@ export default function ScanPage() {
               </Button>
             </div>
           )}
+
         </div>
       </div>
     </div>
