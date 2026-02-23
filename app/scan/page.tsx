@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Camera, User, CheckCircle, XCircle, AlertCircle, RotateCcw, Ticket, Keyboard } from 'lucide-react';
+import { Camera, CameraOff, User, CheckCircle, XCircle, AlertCircle, RotateCcw, Ticket, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API_BASE } from '@/lib/utils';
@@ -197,16 +197,9 @@ export default function ScanPage() {
   const handleManualSubmit = async () => {
     const ticketNum = manualTicket.trim().toUpperCase();
     if (!ticketNum) return;
-    // Construct the JSON format expected by backend
-    const qrData = JSON.stringify({
-      ticket: ticketNum,
-      event: 'Holi Festival 2026',
-      date: '14th March 2026',
-      secret: btoa(`${ticketNum}:holi2026secret`),
-    });
     setManualTicket('');
     setShowManual(false);
-    await handleScan(qrData);
+    await handleScan(ticketNum);
   };
 
   // ── Welcome / name-entry screen ───────────────────────────────────────────
@@ -281,9 +274,20 @@ export default function ScanPage() {
             </p>
           </div>
         </div>
-        <button className="text-orange-200 text-xs underline" onClick={handleChangeName}>
-          Change
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center"
+            onClick={() => scannerReady ? stopScanner() : startScanner()}
+            title={scannerReady ? 'Turn off camera' : 'Turn on camera'}
+          >
+            {scannerReady
+              ? <Camera className="w-4 h-4 text-white" />
+              : <CameraOff className="w-4 h-4 text-white/60" />}
+          </button>
+          <button className="text-orange-200 text-xs underline" onClick={handleChangeName}>
+            Change
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex flex-col">
@@ -295,6 +299,19 @@ export default function ScanPage() {
           gets the same fixed height so html5-qrcode can size the video correctly.
         */}
         <div className="relative bg-black" style={{ height: '300px' }}>
+          {/* Camera-off overlay */}
+          {!scannerReady && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-950 z-30">
+              <CameraOff className="w-12 h-12 text-gray-600" />
+              <p className="text-gray-500 text-sm">Camera is off</p>
+              <button
+                className="text-orange-400 text-xs underline"
+                onClick={startScanner}
+              >
+                Turn on
+              </button>
+            </div>
+          )}
           {/* html5-qrcode target — must have explicit height & position:relative */}
           <div
             id={scannerDivId}
