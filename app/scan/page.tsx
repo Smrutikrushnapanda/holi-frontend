@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
-import { Camera, User, CheckCircle, XCircle, AlertCircle, RotateCcw, Ticket } from 'lucide-react';
+import { Camera, User, CheckCircle, XCircle, AlertCircle, RotateCcw, Ticket, Keyboard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API_BASE } from '@/lib/utils';
@@ -31,10 +31,13 @@ export default function ScanPage() {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [scannerReady, setScannerReady] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  const [manualTicket, setManualTicket] = useState('');
   const scannerRef = useRef<unknown>(null);
   const scannerDivId = 'holi-qr-scanner';
   const lastScanRef = useRef<string>('');
   const cooldownRef = useRef<boolean>(false);
+  const nameLoadedRef = useRef(false);
 
   const startScanner = useCallback(async () => {
     if (typeof window === 'undefined') return;
@@ -54,17 +57,13 @@ export default function ScanPage() {
     try {
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 240, height: 240 } },
+        { fps: 10, qrbox: { width: 220, height: 220 } },
         async (decodedText) => {
           if (cooldownRef.current || decodedText === lastScanRef.current) return;
           cooldownRef.current = true;
           lastScanRef.current = decodedText;
-
           await handleScan(decodedText);
-
-          setTimeout(() => {
-            cooldownRef.current = false;
-          }, 3000);
+          setTimeout(() => { cooldownRef.current = false; }, 3000);
         },
         () => {}
       );
@@ -75,7 +74,7 @@ export default function ScanPage() {
       setScanResult({
         success: false,
         alreadyUsed: false,
-        message: 'Camera access denied. Please allow camera permissions.',
+        message: 'Camera access denied. Please allow camera permissions or use manual entry below.',
       });
     }
   }, []);
@@ -92,10 +91,20 @@ export default function ScanPage() {
     }
   }, []);
 
+  // Load volunteer name from localStorage on mount
   useEffect(() => {
-    return () => {
-      stopScanner();
-    };
+    if (nameLoadedRef.current) return;
+    nameLoadedRef.current = true;
+    const saved = localStorage.getItem('holi-volunteer-name');
+    if (saved && saved.trim()) {
+      setVolunteerName(saved);
+      setNameSet(true);
+      setTimeout(() => startScanner(), 400);
+    }
+  }, [startScanner]);
+
+  useEffect(() => {
+    return () => { stopScanner(); };
   }, [stopScanner]);
 
   const handleScan = async (qrData: string) => {
@@ -129,33 +138,65 @@ export default function ScanPage() {
     }
   };
 
+  const handleManualSubmit = async () => {
+    const ticketNum = manualTicket.trim().toUpperCase();
+    if (!ticketNum) return;
+    // Construct the JSON format the backend expects
+    const qrData = JSON.stringify({
+      ticket: ticketNum,
+      event: 'Holi Festival 2026',
+      date: '14th March 2026',
+      secret: btoa(`${ticketNum}:holi2026secret`),
+    });
+    setManualTicket('');
+    setShowManual(false);
+    await handleScan(qrData);
+  };
+
   const handleReset = async () => {
     setScanStatus('idle');
     setScanResult(null);
     lastScanRef.current = '';
     cooldownRef.current = false;
+    setShowManual(false);
     if (!scannerReady) {
       await startScanner();
     }
   };
 
+  const handleSetName = () => {
+    if (!volunteerName.trim()) return;
+    localStorage.setItem('holi-volunteer-name', volunteerName.trim());
+    setNameSet(true);
+    setTimeout(startScanner, 300);
+  };
+
+  const handleChangeName = () => {
+    localStorage.removeItem('holi-volunteer-name');
+    stopScanner();
+    setNameSet(false);
+    setScanStatus('idle');
+    setScanResult(null);
+    setShowManual(false);
+  };
+
   if (!nameSet) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-orange-500 via-red-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="w-full max-w-sm">
-          {/* Holi decoration circles */}
-          <div className="absolute top-10 left-10 w-20 h-20 bg-yellow-400 rounded-full opacity-30 blur-xl" />
-          <div className="absolute top-20 right-10 w-16 h-16 bg-pink-400 rounded-full opacity-30 blur-xl" />
-          <div className="absolute bottom-20 left-20 w-24 h-24 bg-purple-400 rounded-full opacity-20 blur-xl" />
+      <div className="min-h-screen bg-linear-to-br from-orange-500 via-red-500 to-pink-500 flex items-center justify-center p-4">
+        {/* Decorative blobs */}
+        <div className="absolute top-10 left-10 w-20 h-20 bg-yellow-400 rounded-full opacity-30 blur-xl" />
+        <div className="absolute top-20 right-10 w-16 h-16 bg-pink-400 rounded-full opacity-30 blur-xl" />
+        <div className="absolute bottom-20 left-20 w-24 h-24 bg-purple-400 rounded-full opacity-20 blur-xl" />
+        <div className="absolute bottom-10 right-20 w-14 h-14 bg-yellow-300 rounded-full opacity-25 blur-xl" />
 
-          <div className="relative bg-white rounded-3xl shadow-2xl overflow-hidden">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-orange-500 to-red-500 p-6 text-center">
+        <div className="w-full max-w-sm relative">
+          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+            <div className="bg-linear-to-r from-orange-500 via-pink-500 to-red-500 p-6 text-center">
               <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
                 <span className="text-3xl">🎨</span>
               </div>
-              <h1 className="text-2xl font-bold text-white">Holi Festival</h1>
-              <p className="text-orange-100 text-sm">2026 · Entry Scanner</p>
+              <h1 className="text-2xl font-bold text-white font-festive">Holi Festival 2026 🎨</h1>
+              <p className="text-orange-100 text-sm font-festive">Entry Scanner</p>
             </div>
 
             <div className="p-6 space-y-5">
@@ -173,12 +214,7 @@ export default function ScanPage() {
                   placeholder="Enter volunteer name..."
                   value={volunteerName}
                   onChange={(e) => setVolunteerName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && volunteerName.trim()) {
-                      setNameSet(true);
-                      setTimeout(startScanner, 300);
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSetName(); }}
                   className="text-base h-12 text-center font-medium"
                   autoFocus
                 />
@@ -186,10 +222,7 @@ export default function ScanPage() {
 
               <Button
                 className="w-full h-12 text-base font-semibold"
-                onClick={() => {
-                  setNameSet(true);
-                  setTimeout(startScanner, 300);
-                }}
+                onClick={handleSetName}
                 disabled={!volunteerName.trim()}
               >
                 <Camera className="w-5 h-5" />
@@ -209,51 +242,41 @@ export default function ScanPage() {
   return (
     <div className="min-h-screen bg-gray-950 flex flex-col max-w-md mx-auto">
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-600 to-red-600 p-4 flex items-center justify-between">
+      <div className="bg-linear-to-r from-orange-600 via-pink-600 to-red-600 p-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
             <Ticket className="w-5 h-5 text-white" />
           </div>
           <div>
-            <p className="text-white font-bold text-sm">Holi 2026 · Scanner</p>
+            <p className="text-white font-bold text-sm font-festive">Holi 2026 · Scanner</p>
             <p className="text-orange-200 text-xs flex items-center gap-1">
               <User className="w-3 h-3" />
               {volunteerName}
             </p>
           </div>
         </div>
-        <button
-          className="text-orange-200 text-xs underline"
-          onClick={() => {
-            stopScanner();
-            setNameSet(false);
-            setScanStatus('idle');
-            setScanResult(null);
-          }}
-        >
+        <button className="text-orange-200 text-xs underline" onClick={handleChangeName}>
           Change
         </button>
       </div>
 
       {/* Scanner Area */}
       <div className="flex-1 flex flex-col">
-        {/* QR Camera View */}
-        <div className="relative bg-black" style={{ minHeight: '60vw', maxHeight: '70vw' }}>
+        {/* QR Camera View — fixed 300px height so html5-qrcode fills correctly */}
+        <div className="relative bg-black" style={{ height: '300px' }}>
           <div
             id={scannerDivId}
-            className="w-full h-full"
-            style={{ minHeight: '60vw', maxHeight: '70vw' }}
+            style={{ width: '100%', height: '100%', overflow: 'hidden' }}
           />
 
-          {/* Scanning overlay corners */}
+          {/* Corner overlay for scan box */}
           {scanStatus === 'idle' && scannerReady && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="relative w-48 h-48">
+              <div className="relative w-52 h-52">
                 <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-orange-400 rounded-tl-lg" />
                 <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-orange-400 rounded-tr-lg" />
                 <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-orange-400 rounded-bl-lg" />
                 <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-orange-400 rounded-br-lg" />
-                {/* Scanning line animation */}
                 <div className="absolute top-0 left-0 right-0 h-0.5 bg-orange-400 animate-scan-line" />
               </div>
             </div>
@@ -270,23 +293,57 @@ export default function ScanPage() {
         </div>
 
         {/* Result Panel */}
-        <div className="flex-1 bg-gray-900 p-5">
+        <div className="flex-1 bg-gray-900 p-5 flex flex-col gap-4">
           {scanStatus === 'idle' && (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-center py-6">
-              <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center">
-                <Camera className="w-8 h-8 text-gray-500" />
+            <>
+              <div className="flex flex-col items-center justify-center gap-3 text-center py-4">
+                <div className="w-16 h-16 bg-gray-800 rounded-2xl flex items-center justify-center">
+                  <Camera className="w-8 h-8 text-gray-500" />
+                </div>
+                <p className="text-gray-300 font-medium">Ready to Scan</p>
+                <p className="text-gray-500 text-sm max-w-xs">
+                  Point the camera at the QR code on the ticket
+                </p>
+                {!scannerReady && (
+                  <Button variant="outline" size="sm" onClick={startScanner} className="mt-2">
+                    <Camera className="w-4 h-4" />
+                    Enable Camera
+                  </Button>
+                )}
               </div>
-              <p className="text-gray-300 font-medium">Ready to Scan</p>
-              <p className="text-gray-500 text-sm max-w-xs">
-                Point the camera at the QR code on the ticket
-              </p>
-              {!scannerReady && (
-                <Button variant="outline" size="sm" onClick={startScanner} className="mt-2">
-                  <Camera className="w-4 h-4" />
-                  Enable Camera
-                </Button>
-              )}
-            </div>
+
+              {/* Manual Entry Toggle */}
+              <div className="border-t border-gray-800 pt-4">
+                <button
+                  className="w-full flex items-center justify-center gap-2 text-gray-400 text-sm hover:text-orange-400 transition-colors"
+                  onClick={() => setShowManual(!showManual)}
+                >
+                  <Keyboard className="w-4 h-4" />
+                  {showManual ? 'Hide manual entry' : "Can't scan? Enter ticket number manually"}
+                </button>
+
+                {showManual && (
+                  <div className="mt-3 space-y-2 animate-in">
+                    <Input
+                      placeholder="e.g. HOLI-001"
+                      value={manualTicket}
+                      onChange={(e) => setManualTicket(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleManualSubmit(); }}
+                      className="bg-gray-800 border-gray-700 text-white text-center text-base h-11 font-mono tracking-wider placeholder:text-gray-600"
+                      autoFocus
+                    />
+                    <Button
+                      className="w-full h-11 font-semibold"
+                      onClick={handleManualSubmit}
+                      disabled={!manualTicket.trim()}
+                    >
+                      <Ticket className="w-4 h-4" />
+                      Validate Ticket
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
           )}
 
           {scanStatus === 'success' && scanResult && (
@@ -357,10 +414,7 @@ export default function ScanPage() {
                   <span className="text-gray-300 text-sm">
                     {scanResult.ticket?.scanned_at
                       ? new Date(scanResult.ticket.scanned_at).toLocaleString('en-IN', {
-                          day: '2-digit',
-                          month: 'short',
-                          hour: '2-digit',
-                          minute: '2-digit',
+                          day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
                         })
                       : 'Unknown'}
                   </span>
@@ -401,6 +455,37 @@ export default function ScanPage() {
 
               <div className="bg-gray-800 border border-amber-900 rounded-2xl p-4">
                 <p className="text-gray-300 text-sm">{scanResult.message}</p>
+              </div>
+
+              {/* Show manual entry on error too */}
+              <div className="border-t border-gray-800 pt-3">
+                <button
+                  className="w-full flex items-center justify-center gap-2 text-gray-400 text-sm hover:text-orange-400 transition-colors mb-3"
+                  onClick={() => setShowManual(!showManual)}
+                >
+                  <Keyboard className="w-4 h-4" />
+                  Enter ticket number manually
+                </button>
+                {showManual && (
+                  <div className="space-y-2 animate-in">
+                    <Input
+                      placeholder="e.g. HOLI-001"
+                      value={manualTicket}
+                      onChange={(e) => setManualTicket(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleManualSubmit(); }}
+                      className="bg-gray-800 border-gray-700 text-white text-center text-base h-11 font-mono tracking-wider placeholder:text-gray-600"
+                      autoFocus
+                    />
+                    <Button
+                      className="w-full h-11 font-semibold"
+                      onClick={handleManualSubmit}
+                      disabled={!manualTicket.trim()}
+                    >
+                      <Ticket className="w-4 h-4" />
+                      Validate Ticket
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <Button className="w-full h-12 text-base font-semibold" onClick={handleReset}>

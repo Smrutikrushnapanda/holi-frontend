@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import axios from 'axios';
 import {
   Ticket,
@@ -14,6 +14,13 @@ import {
   Filter,
   RotateCcw,
   TrendingUp,
+  Lock,
+  Eye,
+  EyeOff,
+  Settings,
+  Save,
+  LogOut,
+  Pencil,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -56,7 +63,104 @@ interface TicketsResponse {
   totalPages: number;
 }
 
+interface EventSettings {
+  eventName: string;
+  eventPlace: string;
+  eventDate: string;
+  eventTime: string;
+  organizer: string;
+}
+
+// ─── Login Screen ────────────────────────────────────────────────────────────
+
+function LoginScreen({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = () => {
+    if (username === 'admin' && password === 'password') {
+      sessionStorage.setItem('holi-admin-auth', 'true');
+      onLogin();
+    } else {
+      setError('Invalid username or password');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-linear-to-br from-orange-50 via-red-50 to-pink-50 flex items-center justify-center p-4">
+      {/* Decorative blobs */}
+      <div className="fixed top-0 left-0 w-72 h-72 bg-orange-300 rounded-full opacity-20 blur-3xl -translate-x-1/2 -translate-y-1/2" />
+      <div className="fixed bottom-0 right-0 w-96 h-96 bg-pink-300 rounded-full opacity-20 blur-3xl translate-x-1/2 translate-y-1/2" />
+
+      <div className="w-full max-w-sm relative">
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+          <div className="bg-linear-to-r from-orange-500 via-red-500 to-pink-500 p-6 text-center">
+            <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-3 shadow-lg">
+              <Lock className="w-8 h-8 text-orange-500" />
+            </div>
+            <h1 className="text-xl font-bold text-white font-festive">Admin Dashboard</h1>
+            <p className="text-orange-100 text-sm font-festive">Holi Festival 2026</p>
+          </div>
+
+          <div className="p-6 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Username</label>
+              <Input
+                placeholder="admin"
+                value={username}
+                onChange={(e) => { setUsername(e.target.value); setError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+                className="h-11"
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Password</label>
+              <div className="relative">
+                <Input
+                  type={showPw ? 'text' : 'password'}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+                  className="h-11 pr-10"
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  onClick={() => setShowPw(!showPw)}
+                >
+                  {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <p className="text-red-500 text-sm text-center">{error}</p>
+            )}
+
+            <Button
+              className="w-full h-11 font-semibold"
+              onClick={handleSubmit}
+              disabled={!username || !password}
+            >
+              <Lock className="w-4 h-4" />
+              Sign In
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Dashboard ──────────────────────────────────────────────────────────
+
 export default function AdminDashboard() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [tickets, setTickets] = useState<TicketRow[]>([]);
   const [stats, setStats] = useState<Stats>({ total: 0, used: 0, unused: 0 });
   const [page, setPage] = useState(1);
@@ -70,6 +174,23 @@ export default function AdminDashboard() {
   const [generateCount, setGenerateCount] = useState(200);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [resetting, setResetting] = useState<string | null>(null);
+
+  // Event settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [eventSettings, setEventSettings] = useState<EventSettings>({
+    eventName: 'Holi Festival 2026',
+    eventPlace: 'Festival Ground, Bhubaneswar, Odisha',
+    eventDate: '14th March 2026',
+    eventTime: '04:00 PM Onwards',
+    organizer: 'Holi Committee 2026',
+  });
+
+  // Check session on mount
+  useEffect(() => {
+    const auth = sessionStorage.getItem('holi-admin-auth');
+    if (auth === 'true') setIsLoggedIn(true);
+  }, []);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
@@ -101,10 +222,21 @@ export default function AdminDashboard() {
     }
   }, [page, statusFilter]);
 
+  const fetchEventSettings = useCallback(async () => {
+    try {
+      const { data } = await axios.get<EventSettings>(`${API_BASE}/tickets/event-settings`);
+      setEventSettings(data);
+    } catch {
+      // silent — use defaults
+    }
+  }, []);
+
   useEffect(() => {
+    if (!isLoggedIn) return;
     fetchStats();
     fetchTickets();
-  }, [fetchStats, fetchTickets]);
+    fetchEventSettings();
+  }, [isLoggedIn, fetchStats, fetchTickets, fetchEventSettings]);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -154,14 +286,36 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      await axios.patch(`${API_BASE}/tickets/event-settings`, eventSettings);
+      showToast('Event settings updated for all tickets!');
+      setShowSettings(false);
+    } catch {
+      showToast('Failed to save settings', 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('holi-admin-auth');
+    setIsLoggedIn(false);
+  };
+
   const filteredTickets = tickets.filter((t) =>
     search ? t.ticket_number.toLowerCase().includes(search.toLowerCase()) : true
   );
 
   const usagePercent = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
 
+  if (!isLoggedIn) {
+    return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-red-50">
+    <div className="min-h-screen bg-linear-to-br from-orange-50 to-red-50">
       {/* Toast */}
       {toast && (
         <div
@@ -178,31 +332,107 @@ export default function AdminDashboard() {
       <header className="bg-white border-b border-orange-100 shadow-sm sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
+            <div className="w-10 h-10 bg-linear-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center">
               <Ticket className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">Holi Festival 2026</h1>
+              <h1 className="text-xl font-bold text-gray-900 font-festive">Holi Festival 2026</h1>
               <p className="text-xs text-gray-500">Admin Dashboard</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setShowSettings(!showSettings)}>
+              <Settings className="w-4 h-4" />
+              <span className="hidden sm:inline">Event Settings</span>
+            </Button>
             <Button variant="outline" size="sm" onClick={() => { fetchStats(); fetchTickets(); }}>
               <RefreshCw className="w-4 h-4" />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </Button>
             <Button size="sm" onClick={handleExportPDF} disabled={exporting}>
               <Download className="w-4 h-4" />
               {exporting ? 'Exporting...' : 'Export PDF'}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-500">
+              <LogOut className="w-4 h-4" />
             </Button>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Stats Cards */}
+
+        {/* ── Event Settings Panel ────────────────────── */}
+        {showSettings && (
+          <Card className="border-0 shadow-md border-l-4 border-l-orange-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold text-gray-700 flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-orange-500" />
+                Edit Event Details
+                <span className="text-xs font-normal text-gray-400 ml-1">
+                  (updates all tickets)
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Event Name</label>
+                  <Input
+                    value={eventSettings.eventName}
+                    onChange={(e) => setEventSettings({ ...eventSettings, eventName: e.target.value })}
+                    placeholder="Holi Festival 2026"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Organizer</label>
+                  <Input
+                    value={eventSettings.organizer}
+                    onChange={(e) => setEventSettings({ ...eventSettings, organizer: e.target.value })}
+                    placeholder="Holi Committee 2026"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Event Date</label>
+                  <Input
+                    value={eventSettings.eventDate}
+                    onChange={(e) => setEventSettings({ ...eventSettings, eventDate: e.target.value })}
+                    placeholder="14th March 2026"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Event Time</label>
+                  <Input
+                    value={eventSettings.eventTime}
+                    onChange={(e) => setEventSettings({ ...eventSettings, eventTime: e.target.value })}
+                    placeholder="04:00 PM Onwards"
+                  />
+                </div>
+                <div className="space-y-1 sm:col-span-2">
+                  <label className="text-xs font-medium text-gray-600">Venue</label>
+                  <Input
+                    value={eventSettings.eventPlace}
+                    onChange={(e) => setEventSettings({ ...eventSettings, eventPlace: e.target.value })}
+                    placeholder="Festival Ground, Bhubaneswar, Odisha"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <Button onClick={handleSaveSettings} disabled={savingSettings}>
+                  <Save className="w-4 h-4" />
+                  {savingSettings ? 'Saving...' : 'Save & Apply to All Tickets'}
+                </Button>
+                <Button variant="outline" onClick={() => setShowSettings(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ── Stats Cards ─────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="border-0 shadow-md bg-gradient-to-br from-orange-500 to-red-500 text-white">
+          <Card className="border-0 shadow-md bg-linear-to-br from-orange-500 to-red-500 text-white">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -249,7 +479,7 @@ export default function AdminDashboard() {
               </div>
               <div className="mt-3 bg-gray-100 rounded-full h-2">
                 <div
-                  className="bg-gradient-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-500"
+                  className="bg-linear-to-r from-orange-500 to-red-500 h-2 rounded-full transition-all duration-500"
                   style={{ width: `${usagePercent}%` }}
                 />
               </div>
@@ -257,7 +487,7 @@ export default function AdminDashboard() {
           </Card>
         </div>
 
-        {/* Actions Panel */}
+        {/* ── Generate Tickets ─────────────────────────── */}
         <Card className="border-0 shadow-md">
           <CardHeader className="pb-4">
             <CardTitle className="text-base font-semibold text-gray-700 flex items-center gap-2">
@@ -290,7 +520,7 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Ticket Table */}
+        {/* ── Ticket Table ─────────────────────────────── */}
         <Card className="border-0 shadow-md">
           <CardHeader className="pb-4">
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -374,10 +604,7 @@ export default function AdminDashboard() {
                         <td className="px-5 py-3.5 hidden md:table-cell text-gray-500">
                           {ticket.scanned_at
                             ? new Date(ticket.scanned_at).toLocaleString('en-IN', {
-                                day: '2-digit',
-                                month: 'short',
-                                hour: '2-digit',
-                                minute: '2-digit',
+                                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
                               })
                             : <span className="text-gray-300">—</span>}
                         </td>
@@ -386,9 +613,7 @@ export default function AdminDashboard() {
                         </td>
                         <td className="px-5 py-3.5 hidden lg:table-cell text-gray-400 text-xs">
                           {new Date(ticket.created_at).toLocaleDateString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
+                            day: '2-digit', month: 'short', year: 'numeric',
                           })}
                         </td>
                         <td className="px-5 py-3.5 text-right">
@@ -412,27 +637,16 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-5 py-4 border-t border-gray-100">
                 <p className="text-sm text-gray-500">
                   Page {page} of {totalPages} · {total} tickets
                 </p>
                 <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                  >
+                  <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
                     Previous
                   </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={page === totalPages}
-                  >
+                  <Button size="sm" variant="outline" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
                     Next
                   </Button>
                 </div>
@@ -441,7 +655,7 @@ export default function AdminDashboard() {
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
+        {/* ── Recent Activity ──────────────────────────── */}
         {stats.used > 0 && (
           <Card className="border-0 shadow-md">
             <CardHeader className="pb-3">
@@ -472,11 +686,8 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-5 py-3 text-gray-600">
                             {new Date(ticket.scanned_at!).toLocaleString('en-IN', {
-                              day: '2-digit',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              second: '2-digit',
+                              day: '2-digit', month: 'short', hour: '2-digit',
+                              minute: '2-digit', second: '2-digit',
                             })}
                           </td>
                           <td className="px-5 py-3 text-gray-500">{ticket.scanned_by}</td>

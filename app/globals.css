@@ -83,6 +83,11 @@ body {
   animation: animate-in 0.3s ease-out;
 }
 
+/* Happy festive font utility */
+.font-festive {
+  font-family: var(--font-nunito), 'Arial Rounded MT Bold', Arial, sans-serif;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
