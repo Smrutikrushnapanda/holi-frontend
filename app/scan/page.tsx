@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API_BASE } from '@/lib/utils';
 
-type ScanStatus = 'idle' | 'pending' | 'scanning' | 'success' | 'already_used' | 'error';
+type ScanStatus = 'idle' | 'scanning' | 'success' | 'already_used' | 'error';
 
 interface ScanResult {
   success: boolean;
@@ -32,20 +32,18 @@ export default function ScanPage() {
   const [scannerReady, setScannerReady] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTicket, setManualTicket] = useState('');
-  const [pendingTicketNumber, setPendingTicketNumber] = useState('');
 
-  const scannerRef   = useRef<unknown>(null);
-  const lastScanRef  = useRef<string>('');
-  const cooldownRef  = useRef<boolean>(false);
-  const submittingRef = useRef<boolean>(false);   // use ref — avoids stale closure
+  const scannerRef    = useRef<unknown>(null);
+  const lastScanRef   = useRef<string>('');
+  const cooldownRef   = useRef<boolean>(false);
+  const submittingRef = useRef<boolean>(false);
   const nameLoadedRef = useRef(false);
   const scannerDivId  = 'holi-qr-scanner';
 
-  // ── Always-current handleScan via ref (fixes stale closure in useCallback) ──
   const volunteerNameRef = useRef(volunteerName);
   useEffect(() => { volunteerNameRef.current = volunteerName; }, [volunteerName]);
 
-  // The actual scan handler — called via ref so it's never stale
+  // ── Core scan handler (auto-called on QR detection) ──────────────────────
   const handleScan = useCallback(async (qrData: string) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
@@ -81,11 +79,11 @@ export default function ScanPage() {
     }
   }, []);
 
+  // ── Start camera scanner ─────────────────────────────────────────────────
   const startScanner = useCallback(async () => {
     if (typeof window === 'undefined') return;
     const { Html5Qrcode } = await import('html5-qrcode');
 
-    // Stop any existing scanner first
     if (scannerRef.current) {
       try { await (scannerRef.current as { stop: () => Promise<void> }).stop(); } catch { /* ok */ }
       scannerRef.current = null;
@@ -97,26 +95,16 @@ export default function ScanPage() {
     try {
       await scanner.start(
         { facingMode: 'environment' },
-        {
-          fps: 15,
-          qrbox: { width: 250, height: 250 },
-          aspectRatio: 1.0,
-        },
+        { fps: 15, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
         (decodedText) => {
+          // Ignore if already processing or same QR scanned again
           if (cooldownRef.current || decodedText === lastScanRef.current) return;
           cooldownRef.current = true;
           lastScanRef.current = decodedText;
-
-          // Extract ticket number for preview
-          let ticketNum = decodedText.trim().toUpperCase();
-          try {
-            const parsed = JSON.parse(decodedText);
-            if (parsed.ticket) ticketNum = parsed.ticket;
-          } catch { /* plain ticket number */ }
-
           navigator.vibrate?.(100);
-          setPendingTicketNumber(ticketNum);
-          setScanStatus('pending');
+
+          // ✅ Directly submit — no pending/confirm step
+          handleScan(decodedText);
         },
         () => {} // per-frame error — silent
       );
@@ -177,14 +165,9 @@ export default function ScanPage() {
     submittingRef.current = false;
   };
 
-  const handleSubmitScan = async () => {
-    await handleScan(pendingTicketNumber);
-  };
-
   const handleReset = async () => {
     setScanStatus('idle');
     setScanResult(null);
-    setPendingTicketNumber('');
     lastScanRef.current = '';
     cooldownRef.current = false;
     submittingRef.current = false;
@@ -292,38 +275,26 @@ export default function ScanPage() {
 
       <div className="flex-1 flex flex-col">
         {/* ── Camera area ─────────────────────────────────────────────────── */}
-        {/*
-          IMPORTANT: do NOT put overflow:hidden on the scanner div.
-          html5-qrcode needs position:relative on its container.
-          We give the outer wrapper a fixed height; the inner scanner div
-          gets the same fixed height so html5-qrcode can size the video correctly.
-        */}
         <div className="relative bg-black" style={{ height: '300px' }}>
           {/* Camera-off overlay */}
           {!scannerReady && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gray-950 z-30">
               <CameraOff className="w-12 h-12 text-gray-600" />
               <p className="text-gray-500 text-sm">Camera is off</p>
-              <button
-                className="text-orange-400 text-xs underline"
-                onClick={startScanner}
-              >
+              <button className="text-orange-400 text-xs underline" onClick={startScanner}>
                 Turn on
               </button>
             </div>
           )}
-          {/* html5-qrcode target — must have explicit height & position:relative */}
+
           <div
             id={scannerDivId}
             style={{ width: '100%', height: '300px', position: 'relative' }}
           />
 
-          {/* Custom scan-box corners — absolute over camera view */}
+          {/* Scan-box corners — shown only when idle & ready */}
           {scanStatus === 'idle' && scannerReady && (
-            <div
-              className="absolute inset-0 flex items-center justify-center pointer-events-none"
-              style={{ zIndex: 20 }}
-            >
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: 20 }}>
               <div className="relative" style={{ width: 250, height: 250 }}>
                 <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-orange-400 rounded-tl-lg" />
                 <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-orange-400 rounded-tr-lg" />
@@ -334,11 +305,39 @@ export default function ScanPage() {
             </div>
           )}
 
+          {/* Scanning spinner overlay */}
           {scanStatus === 'scanning' && (
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center" style={{ zIndex: 20 }}>
               <div className="text-center">
                 <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                 <p className="text-white text-sm">Validating...</p>
+              </div>
+            </div>
+          )}
+
+          {/* Success overlay on camera */}
+          {scanStatus === 'success' && (
+            <div className="absolute inset-0 bg-green-500/20 flex items-center justify-center" style={{ zIndex: 20 }}>
+              <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-500/50">
+                <CheckCircle className="w-12 h-12 text-white" />
+              </div>
+            </div>
+          )}
+
+          {/* Already used overlay on camera */}
+          {scanStatus === 'already_used' && (
+            <div className="absolute inset-0 bg-red-500/20 flex items-center justify-center" style={{ zIndex: 20 }}>
+              <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center shadow-2xl shadow-red-500/50">
+                <XCircle className="w-12 h-12 text-white" />
+              </div>
+            </div>
+          )}
+
+          {/* Error overlay on camera */}
+          {scanStatus === 'error' && (
+            <div className="absolute inset-0 bg-amber-500/20 flex items-center justify-center" style={{ zIndex: 20 }}>
+              <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center shadow-2xl shadow-amber-500/50">
+                <AlertCircle className="w-12 h-12 text-white" />
               </div>
             </div>
           )}
@@ -395,38 +394,6 @@ export default function ScanPage() {
             </>
           )}
 
-          {/* PENDING — QR detected, waiting for confirm */}
-          {scanStatus === 'pending' && (
-            <div className="space-y-4 animate-in">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/30">
-                  <Ticket className="w-7 h-7 text-white" />
-                </div>
-                <div>
-                  <p className="text-blue-400 font-bold text-lg">QR Scanned</p>
-                  <p className="text-gray-400 text-sm">Review and confirm entry</p>
-                </div>
-              </div>
-              <div className="bg-gray-800 rounded-2xl p-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400 text-sm">Ticket</span>
-                  <span className="text-white font-mono font-bold text-xl">{pendingTicketNumber}</span>
-                </div>
-              </div>
-              <Button
-                className="w-full h-12 text-base font-semibold bg-green-600 hover:bg-green-700"
-                onClick={handleSubmitScan}
-              >
-                <CheckCircle className="w-5 h-5" />
-                Submit — Allow Entry
-              </Button>
-              <Button variant="outline" className="w-full h-11" onClick={handleReset}>
-                <RotateCcw className="w-4 h-4" />
-                Cancel
-              </Button>
-            </div>
-          )}
-
           {/* SUCCESS */}
           {scanStatus === 'success' && scanResult && (
             <div className="space-y-4 animate-in">
@@ -435,7 +402,7 @@ export default function ScanPage() {
                   <CheckCircle className="w-7 h-7 text-white" />
                 </div>
                 <div>
-                  <p className="text-green-400 font-bold text-lg">Entry Allowed!</p>
+                  <p className="text-green-400 font-bold text-lg">✅ Entry Allowed!</p>
                   <p className="text-gray-400 text-sm">Ticket validated successfully</p>
                 </div>
               </div>
@@ -458,7 +425,7 @@ export default function ScanPage() {
                   <span className="text-gray-200 text-sm text-right max-w-[60%]">{scanResult.ticket?.event_place}</span>
                 </div>
               </div>
-              <Button className="w-full h-12 text-base font-semibold" onClick={handleReset}>
+              <Button className="w-full h-12 text-base font-semibold bg-green-600 hover:bg-green-700" onClick={handleReset}>
                 <Camera className="w-5 h-5" />
                 Scan Next Ticket
               </Button>
@@ -473,8 +440,8 @@ export default function ScanPage() {
                   <XCircle className="w-7 h-7 text-white" />
                 </div>
                 <div>
-                  <p className="text-red-400 font-bold text-lg">Already Used!</p>
-                  <p className="text-gray-400 text-sm">This ticket was already scanned</p>
+                  <p className="text-red-400 font-bold text-lg">🚫 Already Scanned!</p>
+                  <p className="text-gray-400 text-sm">This ticket was already used</p>
                 </div>
               </div>
               <div className="bg-gray-800 border border-red-900 rounded-2xl p-4 space-y-3">
@@ -519,7 +486,7 @@ export default function ScanPage() {
                   <AlertCircle className="w-7 h-7 text-white" />
                 </div>
                 <div>
-                  <p className="text-amber-400 font-bold text-lg">Invalid Ticket</p>
+                  <p className="text-amber-400 font-bold text-lg">⚠️ Invalid Ticket</p>
                   <p className="text-gray-400 text-sm">Could not validate</p>
                 </div>
               </div>
