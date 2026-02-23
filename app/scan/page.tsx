@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { API_BASE } from '@/lib/utils';
 
-type ScanStatus = 'idle' | 'scanning' | 'success' | 'already_used' | 'error';
+type ScanStatus = 'idle' | 'scanning' | 'validated' | 'success' | 'already_used' | 'error';
 
 interface ScanResult {
   success: boolean;
@@ -29,6 +29,7 @@ export default function ScanPage() {
   const [nameSet, setNameSet] = useState(false);
   const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [validatedTicket, setValidatedTicket] = useState<string | null>(null);
   const [scannerReady, setScannerReady] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [manualTicket, setManualTicket] = useState('');
@@ -78,7 +79,7 @@ export default function ScanPage() {
     console.log('[Scan] validate:', `${API_BASE}/${ticketNumber}`);
 
     try {
-      // Step 1: validate ticket number
+      // Step 1: validate ticket number (no DB mutation)
       const { data: validation } = await axios.post<ScanResult>(
         `${API_BASE}/${ticketNumber}`,
       );
@@ -95,27 +96,11 @@ export default function ScanPage() {
         return;
       }
 
-      // Step 2: record entry
-      const { data: entry } = await axios.post<ScanResult>(
-        `${API_BASE}/entry/${ticketNumber}`,
-        {
-          scannedBy: volunteerNameRef.current || 'Volunteer',
-        }
-      );
-
-      console.log('[Scan] entry:', entry);
-
-      setScanResult(entry);
-      if (entry.success) {
-        setScanStatus('success');
-        navigator.vibrate?.([200, 100, 200]);
-      } else if (entry.alreadyUsed) {
-        setScanStatus('already_used');
-        navigator.vibrate?.(500);
-      } else {
-        setScanStatus('error');
-        navigator.vibrate?.(500);
-      }
+      // Pause here; require manual confirmation to mark entry
+      setValidatedTicket(ticketNumber);
+      setScanResult(validation);
+      setScanStatus('validated');
+      navigator.vibrate?.([120, 80, 120]);
 
     } catch (err: unknown) {
       console.error('[Scan] error:', err);
@@ -225,6 +210,7 @@ export default function ScanPage() {
   const handleReset = async () => {
     setScanStatus('idle');
     setScanResult(null);
+    setValidatedTicket(null);
     lastScanRef.current = '';
     cooldownRef.current = false;
     submittingRef.current = false;
@@ -240,6 +226,44 @@ export default function ScanPage() {
     setManualTicket('');
     setShowManual(false);
     await handleScan(ticketNum);
+  };
+
+  const handleConfirmEntry = async () => {
+    if (!validatedTicket) return;
+    setScanStatus('scanning');
+    try {
+      const { data: entry } = await axios.post<ScanResult>(
+        `${API_BASE}/entry/${validatedTicket}`,
+        { scannedBy: volunteerNameRef.current || 'Volunteer' },
+      );
+
+      setScanResult(entry);
+      setValidatedTicket(null);
+
+      if (entry.success) {
+        setScanStatus('success');
+        navigator.vibrate?.([200, 100, 200]);
+      } else if (entry.alreadyUsed) {
+        setScanStatus('already_used');
+        navigator.vibrate?.(500);
+      } else {
+        setScanStatus('error');
+        navigator.vibrate?.(500);
+      }
+    } catch (err: unknown) {
+      console.error('[Entry] error:', err);
+      const message =
+        axios.isAxiosError(err) && err.response?.data?.message
+          ? err.response.data.message
+          : 'Failed to record entry. Check your connection.';
+      setScanResult({ success: false, alreadyUsed: false, message });
+      setScanStatus('error');
+      navigator.vibrate?.(500);
+    } finally {
+      submittingRef.current = false;
+      cooldownRef.current = false;
+      lastScanRef.current = '';
+    }
   };
 
   // ── Welcome / name-entry screen ───────────────────────────────────────────
@@ -470,6 +494,57 @@ export default function ScanPage() {
               <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
               <p className="text-gray-300 font-medium">Validating ticket...</p>
               <p className="text-gray-500 text-sm">Please wait</p>
+            </div>
+          )}
+
+          {/* VALIDATED — waiting for manual confirm */}
+          {scanStatus === 'validated' && scanResult && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/30">
+                  <CheckCircle className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-amber-300 font-bold text-xl">Ticket Valid</p>
+                  <p className="text-gray-400 text-sm">Confirm to mark entry</p>
+                </div>
+              </div>
+              <div className="bg-gray-800 rounded-2xl p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-sm">Ticket</span>
+                  <span className="text-white font-mono font-bold text-lg">{scanResult.ticket?.ticket_number}</span>
+                </div>
+                <div className="h-px bg-gray-700" />
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-sm">Event</span>
+                  <span className="text-gray-200 text-sm">{scanResult.ticket?.event_name}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-sm">Date</span>
+                  <span className="text-gray-200 text-sm">{scanResult.ticket?.event_date}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-sm">Venue</span>
+                  <span className="text-gray-200 text-sm text-right max-w-[60%]">{scanResult.ticket?.event_place}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  variant="secondary"
+                  className="h-12 text-base font-semibold"
+                  onClick={handleReset}
+                >
+                  <RotateCcw className="w-5 h-5" />
+                  Cancel
+                </Button>
+                <Button
+                  className="h-12 text-base font-semibold bg-orange-600 hover:bg-orange-700"
+                  onClick={handleConfirmEntry}
+                >
+                  <CheckCircle className="w-5 h-5" />
+                  Mark Entry
+                </Button>
+              </div>
             </div>
           )}
 
