@@ -24,6 +24,8 @@ interface ScanResult {
   };
 }
 
+const TICKETS_API_BASE = API_BASE.endsWith('/tickets') ? API_BASE : `${API_BASE}/tickets`;
+
 export default function ScanPage() {
   const [volunteerName, setVolunteerName] = useState('');
   const [nameSet, setNameSet] = useState(false);
@@ -76,12 +78,12 @@ export default function ScanPage() {
     }
 
     console.log('[Scan] qrData:', qrData);
-    console.log('[Scan] validate:', `${API_BASE}/${ticketNumber}`);
+    console.log('[Scan] validate:', `${TICKETS_API_BASE}/${ticketNumber}`);
 
     try {
       // Step 1: validate ticket number (no DB mutation)
       const { data: validation } = await axios.post<ScanResult>(
-        `${API_BASE}/${ticketNumber}`,
+        `${TICKETS_API_BASE}/${ticketNumber}`,
       );
 
       console.log('[Scan] validation:', validation);
@@ -233,8 +235,11 @@ export default function ScanPage() {
     setScanStatus('scanning');
     try {
       const { data: entry } = await axios.post<ScanResult>(
-        `${API_BASE}/entry/${validatedTicket}`,
-        { scannedBy: volunteerNameRef.current || 'Volunteer' },
+        `${TICKETS_API_BASE}/entry`,
+        {
+          ticketNumber: validatedTicket,
+          scannedBy: volunteerNameRef.current || 'Volunteer',
+        },
       );
 
       setScanResult(entry);

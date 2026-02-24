@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, ChangeEvent } from 'react';
+import Image from 'next/image';
 import axios from 'axios';
 import {
   Ticket,
@@ -34,6 +35,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { API_BASE } from '@/lib/utils';
+import {
+  type ColumnDef,
+  type SortingState,
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
 
 interface TicketRow {
   id: number;
@@ -69,6 +78,8 @@ interface EventSettings {
   eventDate: string;
   eventTime: string;
   organizer: string;
+  leftLogo?: string;
+  rightLogo?: string;
 }
 
 // ─── Login Screen ────────────────────────────────────────────────────────────
@@ -174,16 +185,19 @@ export default function AdminDashboard() {
   const [generateCount, setGenerateCount] = useState(200);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [resetting, setResetting] = useState<string | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([]);
 
   // Event settings
   const [showSettings, setShowSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [eventSettings, setEventSettings] = useState<EventSettings>({
-    eventName: 'Holi Festival 2026',
-    eventPlace: 'Festival Ground, Bhubaneswar, Odisha',
-    eventDate: '14th March 2026',
-    eventTime: '04:00 PM Onwards',
-    organizer: 'Holi Committee 2026',
+    eventName: 'Holi Hei! 2026',
+    eventPlace: 'Harapur,Near GD Goenka School,In front of DN Fairytale Appartment, Bhubaneswar, Odisha',
+    eventDate: '4th March 2026',
+    eventTime: '10:00 AM Onwards',
+    organizer: 'KALINGA BEATS',
+    leftLogo: '',
+    rightLogo: '',
   });
 
   // Check session on mount
@@ -272,7 +286,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleReset = async (ticketNumber: string) => {
+  const handleReset = useCallback(async (ticketNumber: string) => {
     setResetting(ticketNumber);
     try {
       await axios.post(`${API_BASE}/tickets/${ticketNumber}/reset`);
@@ -284,6 +298,16 @@ export default function AdminDashboard() {
     } finally {
       setResetting(null);
     }
+  }, [fetchStats, fetchTickets]);
+
+  const handleLogoUpload = async (e: ChangeEvent<HTMLInputElement>, key: 'leftLogo' | 'rightLogo') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEventSettings((prev) => ({ ...prev, [key]: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSaveSettings = async () => {
@@ -309,6 +333,92 @@ export default function AdminDashboard() {
   );
 
   const usagePercent = stats.total > 0 ? Math.round((stats.used / stats.total) * 100) : 0;
+
+  const columns = useMemo<ColumnDef<TicketRow>[]>(
+    () => [
+      {
+        accessorKey: 'ticket_number',
+        header: 'Ticket #',
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <span className="font-mono font-bold text-gray-900 text-sm">{row.original.ticket_number}</span>
+            <span className="sm:hidden">
+              <StatusBadge status={row.original.status} />
+            </span>
+          </div>
+        ),
+      },
+      {
+        accessorKey: 'status',
+        header: 'Status',
+        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+        enableSorting: true,
+      },
+      {
+        accessorKey: 'scanned_at',
+        header: 'Scanned At',
+        cell: ({ row }) =>
+          row.original.scanned_at ? (
+            <span className="text-gray-600">
+              {new Date(row.original.scanned_at).toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          ) : (
+            <span className="text-gray-300">—</span>
+          ),
+      },
+      {
+        accessorKey: 'scanned_by',
+        header: 'Scanned By',
+        cell: ({ row }) => <span className="text-gray-600">{row.original.scanned_by || '—'}</span>,
+      },
+      {
+        accessorKey: 'created_at',
+        header: 'Created',
+        cell: ({ row }) => (
+          <span className="text-xs text-gray-500">
+            {new Date(row.original.created_at).toLocaleDateString('en-IN', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+            })}
+          </span>
+        ),
+      },
+      {
+        id: 'actions',
+        header: 'Action',
+        cell: ({ row }) =>
+          row.original.status === 'used' ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleReset(row.original.ticket_number)}
+              disabled={resetting === row.original.ticket_number}
+              className="text-xs text-gray-500 hover:text-orange-600 h-7"
+            >
+              <RotateCcw className="w-3 h-3" />
+              {resetting === row.original.ticket_number ? '...' : 'Reset'}
+            </Button>
+          ) : null,
+        enableSorting: false,
+      },
+    ],
+    [handleReset, resetting]
+  );
+
+  const table = useReactTable({
+    data: filteredTickets,
+    columns,
+    state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
 
   if (!isLoggedIn) {
     return <LoginScreen onLogin={() => setIsLoggedIn(true)} />;
@@ -375,13 +485,13 @@ export default function AdminDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-gray-600">Event Name</label>
-                  <Input
-                    value={eventSettings.eventName}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">Event Name</label>
+                <Input
+                  value={eventSettings.eventName}
                     onChange={(e) => setEventSettings({ ...eventSettings, eventName: e.target.value })}
-                    placeholder="Holi Festival 2026"
+                    placeholder="Holi Hei! 2026"
                   />
                 </div>
                 <div className="space-y-1">
@@ -389,7 +499,7 @@ export default function AdminDashboard() {
                   <Input
                     value={eventSettings.organizer}
                     onChange={(e) => setEventSettings({ ...eventSettings, organizer: e.target.value })}
-                    placeholder="Holi Committee 2026"
+                    placeholder="KALINGA BEATS"
                   />
                 </div>
                 <div className="space-y-1">
@@ -397,7 +507,7 @@ export default function AdminDashboard() {
                   <Input
                     value={eventSettings.eventDate}
                     onChange={(e) => setEventSettings({ ...eventSettings, eventDate: e.target.value })}
-                    placeholder="14th March 2026"
+                    placeholder="4th March 2026"
                   />
                 </div>
                 <div className="space-y-1">
@@ -405,22 +515,62 @@ export default function AdminDashboard() {
                   <Input
                     value={eventSettings.eventTime}
                     onChange={(e) => setEventSettings({ ...eventSettings, eventTime: e.target.value })}
-                    placeholder="04:00 PM Onwards"
+                    placeholder="10:00 AM Onwards"
                   />
                 </div>
-                <div className="space-y-1 sm:col-span-2">
-                  <label className="text-xs font-medium text-gray-600">Venue</label>
+              <div className="space-y-1 sm:col-span-2">
+                <label className="text-xs font-medium text-gray-600">Venue</label>
+                <Input
+                  value={eventSettings.eventPlace}
+                  onChange={(e) => setEventSettings({ ...eventSettings, eventPlace: e.target.value })}
+                  placeholder="Harapur,Near GD Goenka School,In front of DN Fairytale Appartment, Bhubaneswar, Odisha"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">Left Logo (PNG/JPG)</label>
+                <div className="flex gap-2 items-center">
                   <Input
-                    value={eventSettings.eventPlace}
-                    onChange={(e) => setEventSettings({ ...eventSettings, eventPlace: e.target.value })}
-                    placeholder="Festival Ground, Bhubaneswar, Odisha"
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={(e) => handleLogoUpload(e, 'leftLogo')}
+                    className="file:mr-2 file:px-3 file:py-2 file:rounded-lg file:border file:border-orange-200 file:bg-orange-50 file:text-orange-700"
                   />
+                  {eventSettings.leftLogo && (
+                    <Image
+                      src={eventSettings.leftLogo}
+                      alt="Left logo"
+                      width={40}
+                      height={40}
+                      className="h-10 w-10 rounded-md object-contain border"
+                    />
+                  )}
                 </div>
               </div>
-              <div className="flex gap-2 mt-4">
-                <Button onClick={handleSaveSettings} disabled={savingSettings}>
-                  <Save className="w-4 h-4" />
-                  {savingSettings ? 'Saving...' : 'Save & Apply to All Tickets'}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-gray-600">Right Logo (PNG/JPG)</label>
+                <div className="flex gap-2 items-center">
+                  <Input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={(e) => handleLogoUpload(e, 'rightLogo')}
+                    className="file:mr-2 file:px-3 file:py-2 file:rounded-lg file:border file:border-orange-200 file:bg-orange-50 file:text-orange-700"
+                  />
+                  {eventSettings.rightLogo && (
+                    <Image
+                      src={eventSettings.rightLogo}
+                      alt="Right logo"
+                      width={40}
+                      height={40}
+                      className="h-10 w-10 rounded-md object-contain border"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <Button onClick={handleSaveSettings} disabled={savingSettings}>
+                <Save className="w-4 h-4" />
+                {savingSettings ? 'Saving...' : 'Save & Apply to All Tickets'}
                 </Button>
                 <Button variant="outline" onClick={() => setShowSettings(false)}>
                   Cancel
@@ -570,66 +720,61 @@ export default function AdminDashboard() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-5 py-3 font-semibold text-gray-600">Ticket #</th>
-                      <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden sm:table-cell">Status</th>
-                      <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden md:table-cell">Scanned At</th>
-                      <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden lg:table-cell">Scanned By</th>
-                      <th className="text-left px-5 py-3 font-semibold text-gray-600 hidden lg:table-cell">Created</th>
-                      <th className="text-right px-5 py-3 font-semibold text-gray-600">Action</th>
-                    </tr>
+                  <thead className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
+                    {table.getHeaderGroups().map((headerGroup) => (
+                      <tr key={headerGroup.id}>
+                        {headerGroup.headers.map((header) => {
+                          const canSort = header.column.getCanSort();
+                          const responsiveClass =
+                            header.column.id === 'status'
+                              ? 'hidden sm:table-cell'
+                              : header.column.id === 'scanned_at'
+                              ? 'hidden md:table-cell'
+                              : header.column.id === 'scanned_by' || header.column.id === 'created_at'
+                              ? 'hidden lg:table-cell'
+                              : '';
+                          const sortDir = header.column.getIsSorted() as string | false;
+                          return (
+                            <th
+                              key={header.id}
+                              className={`px-5 py-3 font-semibold text-gray-600 text-left select-none ${responsiveClass} ${
+                                canSort ? 'cursor-pointer' : ''
+                              }`}
+                              onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                            >
+                              <div className="flex items-center gap-2">
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                                {sortDir === 'asc' ? '↑' : sortDir === 'desc' ? '↓' : ''}
+                              </div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    ))}
                   </thead>
                   <tbody>
-                    {filteredTickets.map((ticket, idx) => (
+                    {table.getRowModel().rows.map((row, idx) => (
                       <tr
-                        key={ticket.id}
+                        key={row.id}
                         className={`border-b border-gray-50 hover:bg-orange-50/40 transition-colors ${
                           idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'
                         }`}
                       >
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono font-bold text-gray-900 text-sm">
-                              {ticket.ticket_number}
-                            </span>
-                            <span className="sm:hidden">
-                              <StatusBadge status={ticket.status} />
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-3.5 hidden sm:table-cell">
-                          <StatusBadge status={ticket.status} />
-                        </td>
-                        <td className="px-5 py-3.5 hidden md:table-cell text-gray-500">
-                          {ticket.scanned_at
-                            ? new Date(ticket.scanned_at).toLocaleString('en-IN', {
-                                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-                              })
-                            : <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className="px-5 py-3.5 hidden lg:table-cell text-gray-500">
-                          {ticket.scanned_by || <span className="text-gray-300">—</span>}
-                        </td>
-                        <td className="px-5 py-3.5 hidden lg:table-cell text-gray-400 text-xs">
-                          {new Date(ticket.created_at).toLocaleDateString('en-IN', {
-                            day: '2-digit', month: 'short', year: 'numeric',
-                          })}
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          {ticket.status === 'used' && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => handleReset(ticket.ticket_number)}
-                              disabled={resetting === ticket.ticket_number}
-                              className="text-xs text-gray-500 hover:text-orange-600 h-7"
-                            >
-                              <RotateCcw className="w-3 h-3" />
-                              {resetting === ticket.ticket_number ? '...' : 'Reset'}
-                            </Button>
-                          )}
-                        </td>
+                        {row.getVisibleCells().map((cell) => {
+                          const responsiveClass =
+                            cell.column.id === 'status'
+                              ? 'hidden sm:table-cell'
+                              : cell.column.id === 'scanned_at'
+                              ? 'hidden md:table-cell'
+                              : cell.column.id === 'scanned_by' || cell.column.id === 'created_at'
+                              ? 'hidden lg:table-cell'
+                              : '';
+                          return (
+                            <td key={cell.id} className={`px-5 py-3.5 ${responsiveClass}`}>
+                              {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>
