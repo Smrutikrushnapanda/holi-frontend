@@ -78,6 +78,7 @@ interface EventSettings {
   eventDate: string;
   eventTime: string;
   organizer: string;
+  eventPrice: string;
   leftLogo?: string;
   rightLogo?: string;
 }
@@ -196,6 +197,7 @@ export default function AdminDashboard() {
     eventDate: '4th March 2026',
     eventTime: '10:00 AM Onwards',
     organizer: 'KALINGA BEATS',
+    eventPrice: '999',
     leftLogo: '',
     rightLogo: '',
   });
@@ -239,7 +241,11 @@ export default function AdminDashboard() {
   const fetchEventSettings = useCallback(async () => {
     try {
       const { data } = await axios.get<EventSettings>(`${API_BASE}/tickets/event-settings`);
-      setEventSettings(data);
+      setEventSettings((prev) => ({
+        ...prev,
+        ...data,
+        eventPrice: data.eventPrice ?? prev.eventPrice,
+      }));
     } catch {
       // silent — use defaults
     }
@@ -516,6 +522,14 @@ export default function AdminDashboard() {
                     value={eventSettings.eventTime}
                     onChange={(e) => setEventSettings({ ...eventSettings, eventTime: e.target.value })}
                     placeholder="10:00 AM Onwards"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">Price (₹)</label>
+                  <Input
+                    value={eventSettings.eventPrice}
+                    onChange={(e) => setEventSettings({ ...eventSettings, eventPrice: e.target.value })}
+                    placeholder="999"
                   />
                 </div>
               <div className="space-y-1 sm:col-span-2">
